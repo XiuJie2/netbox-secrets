@@ -28,6 +28,14 @@ This section explains the key hierarchy and how secrets are protected.
 - The plaintext is padded with a length header and random padding before encryption.
 - A validation hash of the plaintext is stored to verify decryption integrity.
 
+## Automatic Master Key Resolution
+
+If `PLUGINS_CONFIG['netbox_secrets']['private_key']` is configured (see [Installation](installation.md#private_key)),
+the master key is decrypted from the first active User Key using this configured private key on every request,
+instead of requiring each user to submit their own private key to mint a session key. This removes the manual
+verification step at the cost of the server itself holding a key capable of decrypting all secrets — see the
+security note in the installation guide.
+
 ## Activation Flow
 
 - First User Key: creates and encrypts the master key automatically.

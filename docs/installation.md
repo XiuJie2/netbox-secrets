@@ -98,14 +98,47 @@ Whether the plugin appears as a top-level menu item.
 - Type: `bool`
 - Default: `False`
 
+#### `private_key`
+
+RSA private key (PEM) used to automatically resolve the master key on every request. This removes the need for
+users to submit their private key or refresh an expiring session key — once configured, any authenticated user
+with `view_secret`/`change_secret` permission can read and write secrets without any further verification step.
+
+- Type: `str` (PEM-encoded RSA private key)
+- Default: not set
+
+The key must correspond to an **already-activated** User Key (its `master_key_cipher` must be decryptable with
+this private key) — see [Cryptography](cryptography.md). If this setting is absent, creating or updating a
+secret fails with "No master key is available", and reading a secret returns it still encrypted.
+
+Example:
+
+```python
+PLUGINS_CONFIG = {
+    'netbox_secrets': {
+        'apps': ['dcim.device', 'virtualization.virtualmachine'],
+        'private_key': open('/etc/netbox/secrets_private_key.pem').read(),
+    }
+}
+```
+
+> **Security note:** configuring `private_key` removes the private-key verification that normally gates secret
+> decryption. Anyone with `view_secret` permission — and anyone who can read the NetBox configuration file or
+> process memory — can decrypt secrets without any additional authentication. Store the private key file with
+> restrictive filesystem permissions (e.g. `chmod 600`), keep it out of version control, and treat it as a
+> NetBox-wide secret in its own right.
+
 ### Related NetBox Settings
 
-These are standard NetBox settings that affect session key cookies:
+If `private_key` is **not** configured, secrets fall back to the manual per-user flow described in the
+[Usage Guide](usage.md#3-create-a-session-key), where these standard NetBox settings affect the session key
+cookie's lifetime and transport security:
 
 - `SESSION_COOKIE_SECURE`
 - `LOGIN_TIMEOUT`
 
-Refer to the NetBox security configuration docs for details.
+Once `private_key` is configured, these settings no longer affect secret decryption — see [`private_key`](#private_key)
+above.
 
 ## Run Migrations and Collect Static Files
 

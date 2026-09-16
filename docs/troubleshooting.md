@@ -25,5 +25,13 @@ The last active User Key cannot be deleted if secrets exist. Create and activate
 
 ## Session key keeps prompting in the UI
 
-- Make sure your browser allows session storage.
-- Request a session key again after page reload.
+- If your administrator has configured `PLUGINS_CONFIG['netbox_secrets']['private_key']` (see
+  [Installation](installation.md#private_key)), secrets decrypt automatically and this prompt should not appear
+  again — ask them to enable it.
+- Otherwise, make sure your browser allows session storage, and request a session key again after page reload.
+
+## "No master key is available" when saving a secret / secrets stay encrypted when viewed
+
+`PLUGINS_CONFIG['netbox_secrets']['private_key']` is not set, or the configured key does not match any active
+User Key. Set it to an RSA private key that corresponds to an already-activated User Key — see
+[Installation](installation.md#private_key).

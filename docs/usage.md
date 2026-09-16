@@ -2,6 +2,11 @@
 
 This guide walks through the main workflows in the UI.
 
+> **Note:** if your administrator has configured `PLUGINS_CONFIG['netbox_secrets']['private_key']` (see
+> [Installation](installation.md#private_key)), the master key is resolved automatically on every request. Steps 2
+> and 3 below (activating keys, requesting a session key) are then unnecessary for viewing or editing secrets —
+> secrets decrypt automatically for any user with the appropriate permissions.
+
 ## 1) Create a User Key
 
 A User Key stores a user's RSA public key and an encrypted copy of the master key. The private key never leaves the user.
@@ -55,4 +60,6 @@ Secret Roles are used to categorize secrets (for example, "Login Credentials" or
 3. Fill in the secret details and plaintext.
 4. Save.
 
-If you do not have an active session key, the UI prompts you to provide your private key.
+If `private_key` is configured (see the note above), the secret is encrypted/decrypted automatically and you are
+never prompted for a private key. Otherwise, if you do not have an active session key, the UI prompts you to
+provide your private key.
