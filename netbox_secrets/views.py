@@ -27,9 +27,9 @@ from utilities.exceptions import AbortRequest, PermissionsViolation
 from utilities.forms import restrict_form_fields
 from utilities.querydict import prepare_cloned_fields
 from utilities.views import GetRelatedModelsMixin, GetReturnURLMixin, ViewTab, register_model_view
-from . import exceptions, filtersets, forms, tables, utils
+from . import filtersets, forms, tables, utils
 from .constants import get_public_key_size
-from .models import Secret, SecretRole, SessionKey, UserKey
+from .models import Secret, SecretRole, UserKey
 
 
 #
@@ -187,23 +187,9 @@ class SecretEditView(generic.ObjectEditView):
             'assigned_object_id': request.GET.get('assigned_object_id'),
         }
 
-    def dispatch(self, request, *args, **kwargs):
-        # Check that the user has a valid UserKey
-        try:
-            uk = UserKey.objects.get(user=request.user)
-        except UserKey.DoesNotExist:
-            messages.warning(request, "This operation requires an active user key, but you don't have one.")
-            return redirect('plugins:netbox_secrets:userkey_add')
-        if not uk.is_active():
-            messages.warning(request, "This operation is not available. Your user key has not been activated.")
-            return redirect('plugins:netbox_secrets:userkey', pk=uk.pk)
-
-        return super().dispatch(request, *args, **kwargs)
-
     def post(self, request, *args, **kwargs):
         logger = logging.getLogger('netbox.views.ObjectEditView')
         obj = self.get_object(**kwargs)
-        session_key = utils.get_session_key(request)
 
         # Take a snapshot for change logging (if editing an existing object)
         if obj.pk and hasattr(obj, 'snapshot'):
@@ -221,27 +207,12 @@ class SecretEditView(generic.ObjectEditView):
                     object_created = form.instance.pk is None
                     obj = form.save(commit=False)
 
-                    # We must have a session key in order to set the plaintext of a Secret
-                    if form.cleaned_data['plaintext'] and session_key is None:
-                        logger.debug("Unable to proceed: No session key was provided with the request")
-                        form.add_error(
-                            None,
-                            "No session key was provided with the request. Unable to encrypt secret data.",
-                        )
-
-                    elif form.cleaned_data['plaintext']:
-                        master_key = None
-                        try:
-                            sk = SessionKey.objects.get(userkey__user=request.user)
-                            master_key = sk.get_master_key(session_key)
-                        except SessionKey.DoesNotExist:
-                            logger.debug("Unable to proceed: User has no session key assigned")
-                            form.add_error(None, "No session key found for this user.")
-                        except exceptions.InvalidKey:
-                            logger.debug("Unable to proceed: Session key is invalid")
-                            form.add_error(None, "Invalid session key provided.")
-
-                        if master_key is not None:
+                    if form.cleaned_data['plaintext']:
+                        master_key = utils.get_auto_master_key()
+                        if master_key is None:
+                            logger.debug("Unable to proceed: No master key is available for encryption")
+                            form.add_error(None, "No master key is available. Unable to encrypt secret data.")
+                        else:
                             logger.debug("Successfully resolved master key for encryption")
                             obj.plaintext = str(form.cleaned_data['plaintext'])
                             obj.encrypt(master_key)

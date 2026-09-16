@@ -19,6 +19,7 @@ from netbox.api.viewsets import BaseViewSet, NetBoxModelViewSet, mixins
 from netbox_secrets.constants import *
 from netbox_secrets.exceptions import InvalidKey
 from netbox_secrets.models import Secret, SecretRole, SessionKey, UserKey
+from netbox_secrets.utils import get_auto_master_key
 from . import serializers
 from .. import filtersets
 
@@ -188,71 +189,28 @@ class SecretViewSet(NetBoxModelViewSet):
         context['master_key'] = self.master_key
         return context
 
-    def _get_session_key_from_request(self) -> Optional[bytes]:
-        """
-        Extract and decode session key from request cookies or headers.
-
-        Returns:
-            Decoded session key bytes, or None if not provided
-        """
-        request = self.request
-
-        # Check cookie first
-        if SESSION_COOKIE_NAME in request.COOKIES:
-            try:
-                return base64.b64decode(request.COOKIES[SESSION_COOKIE_NAME])
-            except Exception:
-                return None
-
-        # Check X-Session-Key header
-        if 'HTTP_X_SESSION_KEY' in request.META:
-            try:
-                return base64.b64decode(request.META['HTTP_X_SESSION_KEY'])
-            except Exception:
-                return None
-
-        return None
-
-    def _load_master_key(self, session_key: bytes) -> None:
-        """
-        Load master key using the provided session key.
-
-        Args:
-            session_key: Session key bytes
-
-        Raises:
-            ValidationError: If session key is invalid
-        """
-        try:
-            sk = SessionKey.objects.get(userkey__user=self.request.user)
-            self.master_key = sk.get_master_key(session_key)
-        except SessionKey.DoesNotExist:
-            raise ValidationError(ERR_SESSION_KEY_INVALID)
-        except InvalidKey:
-            raise ValidationError(ERR_SESSION_KEY_INVALID)
-
     def initial(self, request, *args, **kwargs):
         """
         Perform initial request processing and master key loading.
 
+        The master key is resolved automatically (see
+        ``netbox_secrets.utils.get_auto_master_key``) so no per-request
+        private key or session key verification is required.
+
         Raises:
-            ValidationError: If session key is required but missing or invalid
+            ValidationError: If a master key is required (create/update) but
+                none is available.
         """
         super().initial(request, *args, **kwargs)
 
         if not request.user.is_authenticated:
             return
 
-        # Extract session key from request
-        session_key = self._get_session_key_from_request()
+        self.master_key = get_auto_master_key()
 
-        # Require session key for create/update operations
-        if self.action in ['create', 'update', 'partial_update'] and session_key is None:
+        # Require a resolvable master key for create/update operations
+        if self.action in ['create', 'update', 'partial_update'] and self.master_key is None:
             raise ValidationError(ERR_SESSION_KEY_REQUIRED)
-
-        # Load master key if session key provided
-        if session_key is not None:
-            self._load_master_key(session_key)
 
     def _decrypt_secret(self, secret: Secret) -> None:
         """

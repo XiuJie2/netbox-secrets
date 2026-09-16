@@ -374,10 +374,19 @@ class SecretRoleAPITestCase(BaseAPITestCase):
 
 
 class SecretAPITestCase(BaseAPITestCase):
+    """
+    Secret create/retrieve/update no longer require a per-request session key:
+    the master key is resolved automatically via
+    ``netbox_secrets.utils.get_auto_master_key`` (mocked below), removing the
+    need for the client to ever submit a private key or session key.
+    """
+
     def setUp(self):
         super().setUp()
-        self.userkey = self.create_userkey()
-        self.session_key, self.session_key_b64 = self.create_session_key()
+        self.master_key = b'x' * 32
+        patcher = mock.patch('netbox_secrets.api.views.get_auto_master_key', return_value=self.master_key)
+        self.mock_get_auto_master_key = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _secret_payload(self, plaintext='secret'):
         return {
@@ -388,19 +397,18 @@ class SecretAPITestCase(BaseAPITestCase):
             'plaintext': plaintext,
         }
 
-    def test_create_requires_session_key(self):
+    def test_create_requires_master_key(self):
+        self.mock_get_auto_master_key.return_value = None
         url = reverse('plugins-api:netbox_secrets-api:secret-list')
         response = self.client.post(url, data=self._secret_payload(), format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_400_BAD_REQUEST)
 
-    def test_create_with_session_key(self):
+    def test_create_with_auto_master_key(self):
         url = reverse('plugins-api:netbox_secrets-api:secret-list')
-        self.client.cookies[SESSION_COOKIE_NAME] = self.session_key_b64
         response = self.client.post(url, data=self._secret_payload(), format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_201_CREATED)
-        self.client.cookies.pop(SESSION_COOKIE_NAME, None)
 
-    def test_retrieve_with_and_without_session_key(self):
+    def test_retrieve_decrypts_automatically(self):
         secret = Secret.objects.create(
             assigned_object_type=ContentType.objects.get_for_model(self.device),
             assigned_object_id=self.device.pk,
@@ -413,10 +421,7 @@ class SecretAPITestCase(BaseAPITestCase):
         response = self.client.get(url, **self.header)
         self.assertHttpStatus(response, status.HTTP_200_OK)
 
-        response = self.client.get(url, HTTP_X_SESSION_KEY=self.session_key_b64, **self.header)
-        self.assertHttpStatus(response, status.HTTP_200_OK)
-
-    def test_list_with_session_key(self):
+    def test_list_decrypts_automatically(self):
         Secret.objects.create(
             assigned_object_type=ContentType.objects.get_for_model(self.device),
             assigned_object_id=self.device.pk,
@@ -426,10 +431,10 @@ class SecretAPITestCase(BaseAPITestCase):
             hash='dummy',
         )
         url = reverse('plugins-api:netbox_secrets-api:secret-list')
-        response = self.client.get(url, HTTP_X_SESSION_KEY=self.session_key_b64, **self.header)
+        response = self.client.get(url, **self.header)
         self.assertHttpStatus(response, status.HTTP_200_OK)
 
-    def test_update_requires_session_key(self):
+    def test_update_secret(self):
         secret = Secret.objects.create(
             assigned_object_type=ContentType.objects.get_for_model(self.device),
             assigned_object_id=self.device.pk,
@@ -440,54 +445,21 @@ class SecretAPITestCase(BaseAPITestCase):
         )
         url = reverse('plugins-api:netbox_secrets-api:secret-detail', kwargs={'pk': secret.pk})
         response = self.client.patch(url, data={'plaintext': 'new'}, **self.header)
-        self.assertHttpStatus(response, status.HTTP_400_BAD_REQUEST)
-
-        response = self.client.patch(
-            url,
-            data={'plaintext': 'new'},
-            HTTP_X_SESSION_KEY=self.session_key_b64,
-            **self.header,
-        )
         self.assertHttpStatus(response, status.HTTP_200_OK)
 
-    def test_invalid_session_key(self):
-        url = reverse('plugins-api:netbox_secrets-api:secret-list')
-        bad_key = base64.b64encode(b'wrong-key').decode('utf-8')
-        response = self.client.post(
-            url,
-            data=self._secret_payload(),
-            format='json',
-            HTTP_X_SESSION_KEY=bad_key,
-            **self.header,
+    def test_update_requires_master_key(self):
+        self.mock_get_auto_master_key.return_value = None
+        secret = Secret.objects.create(
+            assigned_object_type=ContentType.objects.get_for_model(self.device),
+            assigned_object_id=self.device.pk,
+            role=self.role,
+            name='secret-update-2',
+            ciphertext=b'0123456789abcdef' * 5,
+            hash='dummy',
         )
+        url = reverse('plugins-api:netbox_secrets-api:secret-detail', kwargs={'pk': secret.pk})
+        response = self.client.patch(url, data={'plaintext': 'new'}, **self.header)
         self.assertHttpStatus(response, status.HTTP_400_BAD_REQUEST)
-
-    def test_missing_session_key_record(self):
-        SessionKey.objects.filter(userkey=self.userkey).delete()
-        url = reverse('plugins-api:netbox_secrets-api:secret-list')
-        response = self.client.post(
-            url,
-            data=self._secret_payload(),
-            format='json',
-            HTTP_X_SESSION_KEY=self.session_key_b64,
-            **self.header,
-        )
-        self.assertHttpStatus(response, status.HTTP_400_BAD_REQUEST)
-
-    def test_session_key_decode_error(self):
-        viewset = api_views.SecretViewSet()
-        request = APIRequestFactory().get('/', HTTP_X_SESSION_KEY='bad')
-        viewset.request = request
-        with mock.patch('netbox_secrets.api.views.base64.b64decode', side_effect=Exception):
-            self.assertIsNone(viewset._get_session_key_from_request())
-
-    def test_cookie_session_key_decode_error(self):
-        viewset = api_views.SecretViewSet()
-        request = APIRequestFactory().get('/')
-        request.COOKIES[SESSION_COOKIE_NAME] = 'bad'
-        viewset.request = request
-        with mock.patch('netbox_secrets.api.views.base64.b64decode', side_effect=Exception):
-            self.assertIsNone(viewset._get_session_key_from_request())
 
     def test_initial_unauthenticated(self):
         viewset = api_views.SecretViewSet()
@@ -533,7 +505,7 @@ class SecretAPITestCase(BaseAPITestCase):
             hash='invalid',
         )
         url = reverse('plugins-api:netbox_secrets-api:secret-detail', kwargs={'pk': secret.pk})
-        response = self.client.get(url, HTTP_X_SESSION_KEY=self.session_key_b64, **self.header)
+        response = self.client.get(url, **self.header)
         self.assertHttpStatus(response, status.HTTP_200_OK)
 
 

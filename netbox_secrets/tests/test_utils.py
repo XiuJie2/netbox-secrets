@@ -6,11 +6,20 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.utils import OperationalError
 from django.test import RequestFactory, TestCase, override_settings
 
+from django.contrib.auth import get_user_model
+
 from netbox_secrets import constants as plugin_constants
 from netbox_secrets.hashers import SecretValidationHasher
-from netbox_secrets.models import Secret, SecretRole
+from netbox_secrets.models import Secret, SecretRole, UserKey
 from netbox_secrets.tests.constants import PRIVATE_KEY, PUBLIC_KEY
-from netbox_secrets.utils import decrypt_master_key, encrypt_master_key, generate_random_key, get_session_key
+from netbox_secrets.utils import (
+    clear_auto_master_key_cache,
+    decrypt_master_key,
+    encrypt_master_key,
+    generate_random_key,
+    get_auto_master_key,
+    get_session_key,
+)
 from utilities.testing import create_test_device
 
 
@@ -54,6 +63,48 @@ class RequestHelperTestCase(TestCase):
     def test_get_session_key_missing(self):
         request = self.factory.get('/')
         self.assertIsNone(get_session_key(request))
+
+
+class AutoMasterKeyTestCase(TestCase):
+    """
+    Covers automatic master key resolution, which replaces the interactive
+    private-key/session-key verification flow: once a private key is placed
+    in the plugin configuration, no user ever needs to submit it again.
+    """
+
+    def setUp(self):
+        clear_auto_master_key_cache()
+        self.addCleanup(clear_auto_master_key_cache)
+
+    def test_no_private_key_configured(self):
+        with override_settings(PLUGINS_CONFIG={'netbox_secrets': {}}):
+            self.assertIsNone(get_auto_master_key())
+
+    def test_private_key_configured_without_active_userkey(self):
+        with override_settings(PLUGINS_CONFIG={'netbox_secrets': {'private_key': PRIVATE_KEY}}):
+            self.assertIsNone(get_auto_master_key())
+
+    def test_private_key_configured_with_active_userkey(self):
+        user = get_user_model().objects.create_user(username='auto-key-user')
+        userkey = UserKey.objects.create(user=user, public_key=PUBLIC_KEY)
+        self.assertTrue(userkey.is_active())
+
+        with override_settings(PLUGINS_CONFIG={'netbox_secrets': {'private_key': PRIVATE_KEY}}):
+            master_key = get_auto_master_key()
+
+        self.assertIsNotNone(master_key)
+        self.assertEqual(master_key, userkey.get_master_key(PRIVATE_KEY))
+
+    def test_result_is_cached(self):
+        user = get_user_model().objects.create_user(username='auto-key-cache-user')
+        userkey = UserKey.objects.create(user=user, public_key=PUBLIC_KEY)
+
+        with override_settings(PLUGINS_CONFIG={'netbox_secrets': {'private_key': PRIVATE_KEY}}):
+            first = get_auto_master_key()
+            userkey.delete()
+            second = get_auto_master_key()
+
+        self.assertEqual(first, second)
 
 
 class ConstantsTestCase(TestCase):

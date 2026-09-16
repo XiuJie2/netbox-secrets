@@ -107,7 +107,7 @@ class SecretForm(PrimaryModelForm):
         help_text=_('Enter the secret value. This will be encrypted before storage.'),
         widget=forms.PasswordInput(
             attrs={
-                'class': 'requires-session-key form-control',
+                'class': 'form-control',
                 'autocomplete': 'new-password',
                 'placeholder': _('Enter secret value'),
             },
