@@ -27,13 +27,22 @@ def get_auto_master_key() -> Optional[bytes]:
     private-key verification.
 
     Reads the RSA private key from the ``private_key`` plugin setting and
-    uses it to unlock the first active :class:`~netbox_secrets.models.UserKey`.
-    The result is cached in-process since the underlying UserKey rarely
-    changes and RSA decryption is comparatively expensive.
+    tries it against every active :class:`~netbox_secrets.models.UserKey`
+    (there may be several, each with the master key encrypted for a
+    different user's public key) until one decrypts successfully. A
+    successful result is cached in-process, since the underlying UserKey
+    rarely changes and RSA decryption is comparatively expensive; the cache
+    is also cleared automatically whenever a UserKey is saved or deleted
+    (see ``netbox_secrets.signals``).
+
+    A failed lookup (no private key configured, or none of the active
+    UserKeys decrypt with it) is deliberately *not* cached, so that fixing
+    the configuration takes effect on the next request rather than
+    requiring a process restart.
 
     Returns:
         The decrypted master key, or None if no private key is configured or
-        no active UserKey exists.
+        it doesn't match any active UserKey.
     """
     global _cached_master_key, _cache_populated
 
@@ -47,12 +56,15 @@ def get_auto_master_key() -> Optional[bytes]:
 
     master_key = None
     if private_key:
-        user_key = UserKey.objects.active().first()
-        if user_key:
+        for user_key in UserKey.objects.active():
             master_key = user_key.get_master_key(private_key)
+            if master_key is not None:
+                break
 
-    _cached_master_key = master_key
-    _cache_populated = True
+    if master_key is not None:
+        _cached_master_key = master_key
+        _cache_populated = True
+
     return master_key
 
 

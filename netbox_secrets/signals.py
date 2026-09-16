@@ -5,7 +5,23 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import ProgrammingError
 from django.db.backends.postgresql.base import DatabaseWrapper
 from django.db.backends.signals import connection_created
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+
+
+@receiver(post_save, sender='netbox_secrets.UserKey')
+@receiver(post_delete, sender='netbox_secrets.UserKey')
+def invalidate_auto_master_key_cache(sender, **kwargs):
+    """
+    Clear the cached auto-unlock master key whenever a UserKey changes.
+
+    Without this, activating/rotating/deleting the UserKey that backs the
+    configured ``private_key`` setting would only take effect after a
+    process restart.
+    """
+    from .utils import clear_auto_master_key_cache
+
+    clear_auto_master_key_cache()
 
 
 @receiver(connection_created, sender=DatabaseWrapper)

@@ -91,6 +91,14 @@
         {% if object.user == request.user %}
             {% if object.is_filled and object.is_active %}
                 <div class="col col-md-6">
+                    {% if auto_unlock_enabled %}
+                        <div class="alert alert-info noprint">
+                            <i class="mdi mdi-information-outline" aria-hidden="true"></i>
+                            The server is configured to unlock secrets automatically
+                            (<code>private_key</code> is set). You do not need a session key to view or edit
+                            secrets — the panel below is informational only.
+                        </div>
+                    {% endif %}
                     <div class="card">
                         <h5 class="card-header">Session Key</h5>
                         <div class="card-body">

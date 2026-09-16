@@ -103,6 +103,7 @@ class SecretForm(PrimaryModelForm):
     plaintext = forms.CharField(
         max_length=SECRET_PLAINTEXT_MAX_LENGTH,
         required=False,
+        strip=False,
         label=_('Plaintext'),
         help_text=_('Enter the secret value. This will be encrypted before storage.'),
         widget=forms.PasswordInput(
@@ -116,6 +117,7 @@ class SecretForm(PrimaryModelForm):
     plaintext2 = forms.CharField(
         max_length=SECRET_PLAINTEXT_MAX_LENGTH,
         required=False,
+        strip=False,
         label=_('Plaintext (verify)'),
         help_text=_('Re-enter the secret value to confirm.'),
         widget=forms.PasswordInput(

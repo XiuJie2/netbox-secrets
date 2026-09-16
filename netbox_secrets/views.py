@@ -340,6 +340,9 @@ class UserKeyView(generic.ObjectView):
     queryset = UserKey.objects.all()
     template_name = 'netbox_secrets/userkey.html'
 
+    def get_extra_context(self, request, instance):
+        return {'auto_unlock_enabled': utils.get_auto_master_key() is not None}
+
 
 @register_model_view(UserKey, 'delete')
 class UserKeyDeleteView(generic.ObjectDeleteView):

@@ -241,6 +241,20 @@ class UserKeyViewTestCase(TestCase):
         context = view.get_extra_context(request)
         self.assertIn('user_key', context)
 
+    def test_userkey_view_auto_unlock_context(self):
+        userkey = UserKey.objects.create(user=self.user, public_key=PUBLIC_KEY)
+        request = RequestFactory().get('/')
+        request.user = self.user
+        view = plugin_views.UserKeyView()
+
+        with mock.patch('netbox_secrets.views.utils.get_auto_master_key', return_value=None):
+            context = view.get_extra_context(request, userkey)
+        self.assertFalse(context['auto_unlock_enabled'])
+
+        with mock.patch('netbox_secrets.views.utils.get_auto_master_key', return_value=b'x' * 32):
+            context = view.get_extra_context(request, userkey)
+        self.assertTrue(context['auto_unlock_enabled'])
+
     def test_userkey_list_activate_button_visible_for_active_key(self):
         UserKey.objects.create(user=self.user, public_key=PUBLIC_KEY)
         response = self.client.get(reverse('plugins:netbox_secrets:userkey_list'))

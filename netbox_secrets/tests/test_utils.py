@@ -96,15 +96,73 @@ class AutoMasterKeyTestCase(TestCase):
         self.assertEqual(master_key, userkey.get_master_key(PRIVATE_KEY))
 
     def test_result_is_cached(self):
+        # A successful lookup should not re-query the database on the next call
+        # (invalidation on UserKey change is covered separately, below).
         user = get_user_model().objects.create_user(username='auto-key-cache-user')
         userkey = UserKey.objects.create(user=user, public_key=PUBLIC_KEY)
 
         with override_settings(PLUGINS_CONFIG={'netbox_secrets': {'private_key': PRIVATE_KEY}}):
             first = get_auto_master_key()
-            userkey.delete()
-            second = get_auto_master_key()
+            with mock.patch.object(UserKey, 'objects') as mocked_objects:
+                second = get_auto_master_key()
+            mocked_objects.active.assert_not_called()
 
         self.assertEqual(first, second)
+        self.assertEqual(first, userkey.get_master_key(PRIVATE_KEY))
+
+    def test_failed_lookup_is_not_cached(self):
+        # No matching active UserKey yet -> resolves to None and must be retried, not stuck until restart.
+        with override_settings(PLUGINS_CONFIG={'netbox_secrets': {'private_key': PRIVATE_KEY}}):
+            self.assertIsNone(get_auto_master_key())
+
+            user = get_user_model().objects.create_user(username='auto-key-late-user')
+            userkey = UserKey.objects.create(user=user, public_key=PUBLIC_KEY)
+            master_key = get_auto_master_key()
+
+        self.assertEqual(master_key, userkey.get_master_key(PRIVATE_KEY))
+
+    def test_tries_all_active_userkeys(self):
+        """
+        The configured private key may not match the first active UserKey by
+        ordering (e.g. other users were also activated for the same master
+        key) -- every active UserKey must be tried before giving up.
+        """
+        from Crypto.PublicKey import RSA
+
+        other_key = RSA.generate(2048)
+        other_public = other_key.publickey().export_key('PEM').decode('utf-8')
+        other_private = other_key.export_key('PEM')
+
+        # Sorts first by username, so it's tried (and fails) before the matching key.
+        other_user = get_user_model().objects.create_user(username='aaa-other-key-user')
+        other_userkey = UserKey.objects.create(user=other_user, public_key=other_public)
+        master_key = other_userkey.get_master_key(other_private)
+
+        matching_user = get_user_model().objects.create_user(username='zzz-matching-key-user')
+        matching_userkey = UserKey.objects.create(user=matching_user, public_key=PUBLIC_KEY)
+        matching_userkey.activate(master_key)
+
+        ordered_usernames = list(UserKey.objects.active().values_list('user__username', flat=True))
+        self.assertEqual(ordered_usernames[0], 'aaa-other-key-user')
+
+        with override_settings(PLUGINS_CONFIG={'netbox_secrets': {'private_key': PRIVATE_KEY}}):
+            resolved = get_auto_master_key()
+
+        self.assertEqual(resolved, master_key)
+
+    def test_cache_invalidated_on_userkey_save_and_delete(self):
+        user = get_user_model().objects.create_user(username='auto-key-signal-user')
+        userkey = UserKey.objects.create(user=user, public_key=PUBLIC_KEY)
+
+        with override_settings(PLUGINS_CONFIG={'netbox_secrets': {'private_key': PRIVATE_KEY}}):
+            self.assertIsNotNone(get_auto_master_key())
+
+            # Saving a UserKey (e.g. rotating it) invalidates the cache without a restart.
+            userkey.save()
+            self.assertIsNotNone(get_auto_master_key())
+
+            userkey.delete()
+            self.assertIsNone(get_auto_master_key())
 
 
 class ConstantsTestCase(TestCase):

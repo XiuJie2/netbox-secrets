@@ -121,6 +121,16 @@ class SecretFormTestCase(TestCase):
         )
         self.assertTrue(form.is_valid())
 
+    def test_secret_form_preserves_surrounding_whitespace(self):
+        """Leading/trailing whitespace is part of the secret and must not be trimmed on save."""
+        value = '  secret with spaces  '
+        form = SecretForm(
+            data={'name': 's6', 'role': self.role.pk, 'plaintext': value, 'plaintext2': value},
+            instance=self._instance(),
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['plaintext'], value)
+
 
 class UserKeyFormTestCase(TestCase):
     def setUp(self):

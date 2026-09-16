@@ -83,6 +83,28 @@ class SerializerTestCase(TestCase):
         self.assertIn('hash', serializer.validated_data)
         self.assertNotIn('plaintext', serializer.validated_data)
 
+    def test_secret_serializer_preserves_surrounding_whitespace(self):
+        """Leading/trailing whitespace is part of the secret and must not be trimmed on input."""
+        master_key = b'x' * 32
+        value = '  clear with spaces  '
+        serializer = serializers.SecretSerializer(
+            data={
+                'assigned_object_type': 'dcim.device',
+                'assigned_object_id': self.device.pk,
+                'role': self.role.pk,
+                'name': 'secret',
+                'plaintext': value,
+            },
+            context={'request': None, 'master_key': master_key},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        secret = Secret()
+        secret.ciphertext = serializer.validated_data['ciphertext']
+        secret.hash = serializer.validated_data['hash']
+        secret.decrypt(master_key)
+        self.assertEqual(secret.plaintext, value)
+
     def test_secret_serializer_requires_master_key(self):
         serializer = serializers.SecretSerializer(
             data={
