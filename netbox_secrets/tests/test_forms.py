@@ -98,19 +98,21 @@ class SecretFormTestCase(TestCase):
         )
         self.assertFalse(form.is_valid())
 
-    def test_secret_form_plaintext_whitespace(self):
+    def test_secret_form_whitespace_only_is_valid(self):
+        """A whitespace-only value is meaningful content, not "empty" -- it must be accepted."""
         form = SecretForm(
             data={'name': 's4', 'role': self.role.pk, 'plaintext': '   ', 'plaintext2': '   '},
             instance=self._instance(),
         )
-        self.assertFalse(form.is_valid())
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['plaintext'], '   ')
 
     def test_secret_form_clean_plaintext_empty(self):
         form = SecretForm(
             data={'name': 's5', 'role': self.role.pk, 'plaintext': 'x', 'plaintext2': 'x'},
             instance=self._instance(),
         )
-        form.cleaned_data = {'plaintext': '   '}
+        form.cleaned_data = {'plaintext': ''}
         with self.assertRaises(Exception):
             form.clean_plaintext()
 

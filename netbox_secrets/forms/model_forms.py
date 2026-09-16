@@ -163,8 +163,10 @@ class SecretForm(PrimaryModelForm):
         """Validate plaintext field."""
         plaintext = self.cleaned_data.get('plaintext', '')
 
-        # Check for minimum length on new secrets
-        if not self.instance.pk and len(plaintext.strip()) < 1:
+        # Reject only a truly empty value on new secrets. A whitespace-only value is
+        # treated as meaningful content now that surrounding whitespace is preserved
+        # (not stripped), so it must not be judged "empty" via a stripped comparison.
+        if not self.instance.pk and len(plaintext) < 1:
             raise ValidationError(_("Secret value cannot be empty."))
 
         return plaintext
