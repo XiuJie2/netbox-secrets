@@ -65,6 +65,21 @@ class SecretRoleViewTestCase(TestCase):
         ctx = view.get_extra_context(request, secret)
         self.assertIn('related_models', ctx)
 
+    def test_secret_view_renders_copy_button(self):
+        role = SecretRole.objects.create(name='Role3', slug='role3')
+        device = create_test_device('device-view-3')
+        secret = Secret.objects.create(
+            assigned_object_type=ContentType.objects.get_for_model(device),
+            assigned_object_id=device.pk,
+            role=role,
+            name='secret3',
+            ciphertext=b'0123456789abcdef' * 5,
+            hash='dummy',
+        )
+        response = self.client.get(secret.get_absolute_url())
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'secret-copy-button')
+
 
 class SecretEditViewAccessTestCase(TestCase):
     """
